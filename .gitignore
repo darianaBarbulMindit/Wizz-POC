@@ -1,28 +1,28 @@
-# Angular specific
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+backend/.env
+
+# ── Build outputs ─────────────────────────────────────────────────────────────
+backend/dist/
+frontend/dist/
+frontend/.angular/
 /dist/
 /out-tsc/
 /tmp/
 /coverage/
-/e2e/test-output/
-/.angular/
-.angular/
-
-# Node modules and dependency files
-/node_modules/
-/package-lock.json
-/yarn.lock
-
-# Environment files
-/.env
-
-# Angular CLI and build artefacts
-/.angular-cli.json
-/.ng/
-
-# TypeScript cache
 *.tsbuildinfo
 
-# Logs
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# ── Generated API (regenerated at build time) ─────────────────────────────────
+frontend/src/app/api/
+frontend/.openapi-generator/
+frontend/.openapi-generator-ignore
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

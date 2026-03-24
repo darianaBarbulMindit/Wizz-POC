@@ -1,0 +1,473 @@
+openapi: 3.0.3
+info:
+  title: Wizz Air Pricing Management API
+  description: REST API for reading, updating, and operationalizing flight pricing allocations.
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Databricks App backend
+
+security:
+  - DatabricksIdentity: []
+
+paths:
+
+  /prices:
+    get:
+      summary: List pricing records
+      description: Returns paginated pricing records from the pricing_main Delta table.
+      operationId: getPrices
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/SortColumn'
+        - $ref: '#/components/parameters/SortDirection'
+        - name: filter_flight_id
+          in: query
+          schema:
+            type: string
+          description: Exact or partial match on Flight_ID.
+        - name: filter_fare_class
+          in: query
+          schema:
+            $ref: '#/components/schemas/FareClass'
+          description: Filter by Fare_Class.
+        - name: filter_allocation_min
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 300
+        - name: filter_allocation_max
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 300
+        - name: filter_calculation_method
+          in: query
+          schema:
+            $ref: '#/components/schemas/CalculationMethod'
+      responses:
+        '200':
+          description: Paginated list of pricing records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /prices/count:
+    post:
+      summary: Count rows matching filters
+      description: >
+        Returns the total number of rows matching the provided filters across
+        all pages. Also indicates whether the count exceeds the sync threshold.
+        Called before opening the filter-based Bulk Edit modal.
+      operationId: getPricesCount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FiltersPayload'
+      responses:
+        '200':
+          description: Matched row count and threshold flag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricesCountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /prices/update:
+    post:
+      summary: Update individual pricing rows
+      description: >
+        Accepts an array of individual row changes. Writes updates to
+        pricing_main and inserts an audit entry into pricing_audit for each
+        changed row.
+      operationId: updatePrices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePricesRequest'
+      responses:
+        '200':
+          description: Update applied successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatePricesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /prices/bulk-update:
+    post:
+      summary: Bulk update pricing rows by filter
+      description: >
+        Accepts filter criteria and update values. Executes an UPDATE WHERE
+        on the SQL Warehouse for all matching rows, including those not loaded
+        in the frontend. Writes audit entries for all affected rows.
+        If the matched row count exceeds the server-side BULK_SYNC_THRESHOLD,
+        the request is automatically escalated to an async Databricks Job and
+        a 202 is returned instead of 200.
+      operationId: bulkUpdatePrices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUpdateRequest'
+      responses:
+        '200':
+          description: Sync update applied successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkUpdateSyncResponse'
+        '202':
+          description: Row count exceeded threshold — async job triggered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkUpdateAsyncResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /run-job:
+    post:
+      summary: Trigger a Databricks Job
+      description: >
+        Triggers a Databricks Job. Used for standard pricing recalculation
+        runs (job_type: PRICING_RECALCULATION) and for async bulk update
+        escalations (job_type: BULK_PRICING_UPDATE).
+      operationId: runJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunJobRequest'
+      responses:
+        '202':
+          description: Job triggered successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+
+  securitySchemes:
+    DatabricksIdentity:
+      type: apiKey
+      in: header
+      name: X-Databricks-User
+      description: Injected automatically by the Databricks App runtime.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    SortColumn:
+      name: sort_column
+      in: query
+      schema:
+        type: string
+        enum: [Flight_ID, Fare_Class, Allocation, Portfolio_Manager, Calculation_Method, Changed_By_User, Changed_DateTime]
+    SortDirection:
+      name: sort_direction
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+
+  schemas:
+
+    FareClass:
+      type: string
+      enum: [BASIC, WIZZ_GO, WIZZ_PLUS]
+
+    CalculationMethod:
+      type: string
+      enum: [DYNAMIC_PRICING, REVENUE_MANAGEMENT, MANUAL_OVERRIDE]
+
+    PricingRecord:
+      type: object
+      properties:
+        Flight_ID:
+          type: string
+          example: "1001234567891"
+        Fare_Class:
+          $ref: '#/components/schemas/FareClass'
+        Allocation:
+          type: integer
+          minimum: 0
+          maximum: 300
+          example: 115
+        Portfolio_Manager:
+          type: string
+          example: "Bob Martinez"
+        Calculation_Method:
+          $ref: '#/components/schemas/CalculationMethod'
+        Changed_By_User:
+          type: string
+          example: "sarah.smith@wizzair.com"
+        Changed_DateTime:
+          type: string
+          format: date-time
+          example: "2025-11-21T08:06:19Z"
+
+    PricesResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PricingRecord'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            page_size:
+              type: integer
+            total_count:
+              type: integer
+            total_pages:
+              type: integer
+
+    ColumnFilter:
+      type: object
+      required: [column, operator, value]
+      properties:
+        column:
+          type: string
+          enum: [Flight_ID, Fare_Class, Allocation, Calculation_Method]
+        operator:
+          type: string
+          enum: [eq, in, lt, lte, gt, gte]
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: number
+
+    FiltersPayload:
+      type: object
+      required: [filters]
+      properties:
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnFilter'
+
+    PricesCountResponse:
+      type: object
+      properties:
+        matched_count:
+          type: integer
+          example: 340
+        exceeds_sync_threshold:
+          type: boolean
+          example: false
+
+    PricingRowChange:
+      type: object
+      required: [Flight_ID]
+      properties:
+        Flight_ID:
+          type: string
+        Fare_Class:
+          $ref: '#/components/schemas/FareClass'
+        Allocation:
+          type: integer
+          minimum: 0
+          maximum: 300
+
+    UpdatePricesRequest:
+      type: object
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PricingRowChange'
+
+    UpdatePricesResponse:
+      type: object
+      properties:
+        affected_rows:
+          type: integer
+        Changed_By_User:
+          type: string
+        Changed_DateTime:
+          type: string
+          format: date-time
+
+    BulkUpdateFields:
+      type: object
+      description: Fields to update. Omitted fields keep their existing values.
+      properties:
+        Fare_Class:
+          $ref: '#/components/schemas/FareClass'
+        Allocation:
+          type: integer
+          minimum: 0
+          maximum: 300
+        Calculation_Method:
+          $ref: '#/components/schemas/CalculationMethod'
+        Portfolio_Manager:
+          type: string
+
+    BulkUpdateRequest:
+      type: object
+      required: [filters, updates]
+      properties:
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnFilter'
+        updates:
+          $ref: '#/components/schemas/BulkUpdateFields'
+
+    BulkUpdateSyncResponse:
+      type: object
+      properties:
+        affected_rows:
+          type: integer
+          example: 87
+        Changed_By_User:
+          type: string
+          example: "sarah.smith@wizzair.com"
+        Changed_DateTime:
+          type: string
+          format: date-time
+
+    BulkUpdateAsyncResponse:
+      type: object
+      properties:
+        job_run_id:
+          type: string
+          example: "8271649"
+        status:
+          type: string
+          enum: [TRIGGERED]
+        message:
+          type: string
+          example: "Bulk update job queued for ~340 flights"
+
+    RunJobRequest:
+      type: object
+      required: [job_type]
+      properties:
+        job_type:
+          type: string
+          enum: [PRICING_RECALCULATION, BULK_PRICING_UPDATE]
+        parameters:
+          type: object
+          description: Required when job_type is BULK_PRICING_UPDATE.
+          properties:
+            filters:
+              type: array
+              items:
+                $ref: '#/components/schemas/ColumnFilter'
+            updates:
+              $ref: '#/components/schemas/BulkUpdateFields'
+
+    RunJobResponse:
+      type: object
+      properties:
+        job_run_id:
+          type: string
+          example: "8271649"
+        status:
+          type: string
+          enum: [TRIGGERED]
+        message:
+          type: string
+          example: "Update job triggered successfully"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request payload.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid Databricks identity header.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: User does not have permission to perform this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

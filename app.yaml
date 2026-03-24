@@ -1,0 +1,47 @@
+# Databricks App deployment descriptor
+# Docs: https://docs.databricks.com/en/dev-tools/databricks-apps/
+
+command:
+  - node
+  - backend/dist/index.js
+
+env:
+  - name: NODE_ENV
+    value: production
+
+  - name: PORT
+    value: '8000'
+
+  - name: STATIC_DIR
+    value: 'frontend/dist/frontend/browser'
+
+  - name: DATABRICKS_CATALOG
+    value: 'catalog_ymtuipoc_dev_midas_001'
+
+  - name: DATABRICKS_SCHEMA
+    value: 'samples'
+
+  - name: BULK_SYNC_THRESHOLD
+    value: '500'
+
+  # Secrets — stored in a Databricks secret scope named "wizz-poc"
+  # Create with: databricks secrets put-secret wizz-poc <key> --string-value <value>
+  - name: DATABRICKS_HOST
+    valueFrom:
+      secretScope: wizz-poc
+      secretKey: databricks-host
+
+  - name: DATABRICKS_HTTP_PATH
+    valueFrom:
+      secretScope: wizz-poc
+      secretKey: databricks-http-path
+
+  - name: DATABRICKS_TOKEN
+    valueFrom:
+      secretScope: wizz-poc
+      secretKey: databricks-token
+
+  - name: DATABRICKS_JOB_ID_BULK_UPDATE
+    valueFrom:
+      secretScope: wizz-poc
+      secretKey: bulk-update-job-id
